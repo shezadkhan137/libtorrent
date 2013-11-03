@@ -4,6 +4,7 @@ import (
 	"github.com/torrance/libtorrent/bitfield"
 	"io"
 	"sync"
+	"time"
 	//"testing/iotest"
 )
 
@@ -39,14 +40,24 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 
 	// Write loop
 	go func() {
+		ticker := time.NewTicker(30 * time.Second)
 		for {
-			//conn := iotest.NewWriteLogger("Writing", conn)
-			// TODO: send regular keep alive requests
-			msg := <-p.write
-			if err := msg.BinaryDump(conn); err != nil {
-				// TODO: Close peer
-				logger.Error("%s Received error writing to connection: %s", p.name, err)
-				return
+			select {
+			case tick := <-ticker.C:
+				logger.Debug("%s Is being sent a keep alive message", p.name)
+				msg := new(keepAliveMessage)
+				if err := msg.BinaryDump(conn); err != nil {
+					// TODO: Close peer
+					ticker.Stop()
+					logger.Error("%s Received error writing to connection: %s", p.name, err)
+					return
+				}
+			case msg := <-p.write:
+				if err := msg.BinaryDump(conn); err != nil {
+					// TODO: Close peer
+					logger.Error("%s Received error writing to connection: %s", p.name, err)
+					return
+				}
 			}
 		}
 	}()

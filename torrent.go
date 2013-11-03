@@ -127,6 +127,10 @@ func (tor *Torrent) Start() {
 				// Unchoke interested peers
 				// TODO: Implement maximum unchoked peers
 				// TODO: Implement optimistic unchoking algorithm
+				// TODO: will do this through policy struct
+				// something like;
+				// tor.policy.ChokeUnchokePeers(tor.swarm, tor.swarmTally)
+
 				for _, peer := range tor.swarm {
 					if peer.GetPeerInterested() && peer.GetAmChoking() {
 						logger.Debug("Unchoking peer %s", peer.name)
@@ -134,6 +138,11 @@ func (tor *Torrent) Start() {
 						peer.SetAmChoking(false)
 					}
 				}
+
+				//TODO: Something like;
+				//tor.policy.RequestBlocks(tor.swarm, tor.swarmTally)
+				//this will be incharge of analysing the swarm and
+				//send request messages out to the peers
 			}
 		}
 	}()
@@ -144,6 +153,15 @@ func (tor *Torrent) Start() {
 			peerDouble := <-tor.readChan
 			peer := peerDouble.peer
 			msg := peerDouble.msg
+
+			if peer.bitf == nil {
+				if _, ok := msg.(*bitfieldMessage); !ok {
+					// We did not get a bitfield message
+					// And the peer bitfield has not been set yet.
+					logger.Debug("No bitfield sent by %s. Setting it to blank", peer.name)
+					peer.SetBitfield(bitfield.NewBitfield(tor.bitf.Length()))
+				}
+			}
 
 			switch msg := msg.(type) {
 			case *chokeMessage:
@@ -194,8 +212,11 @@ func (tor *Torrent) Start() {
 					blockOffset: msg.blockOffset,
 					data:        block,
 				}
-				// case *pieceMessage:
-				// case *cancelMessage:
+			// case *pieceMessage:
+			// 	logger.Debug("Peer %s sent piece message", peer.name)
+			// 	// TODO: call filestore.SetBlock()
+			// case *cancelMessage:
+			// 	logger.Debug("Peer %s send cancel message", peer.name)
 			default:
 				logger.Debug("Peer %s sent unknown message", peer.name)
 			}

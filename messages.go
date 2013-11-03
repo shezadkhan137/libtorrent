@@ -299,6 +299,14 @@ func (msg *pieceMessage) BinaryDump(w io.Writer) error {
 	return mw.err
 }
 
+type keepAliveMessage struct{}
+
+func (msg *keepAliveMessage) BinaryDump(w io.Writer) error {
+	mw := monadWriter{w: w}
+	mw.Write(uint32(0))
+	return mw.err
+}
+
 type unknownMessage struct {
 	id     uint8
 	length uint32

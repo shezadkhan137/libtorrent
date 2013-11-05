@@ -28,6 +28,7 @@ type Torrent struct {
 	fileStore        *filestore.FileStore
 	config           *Config
 	bitf             *bitfield.Bitfield
+	policy           Policy
 	swarm            []*peer
 	incomingPeer     chan *peer
 	incomingPeerAddr chan string
@@ -46,6 +47,7 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 		incomingPeerAddr: make(chan string, 100),
 		readChan:         make(chan peerDouble, 50),
 		state:            Stopped,
+		policy:           new(BasicPolicy),
 	}
 
 	// Extract file information to create a slice of torrentStorers
@@ -68,6 +70,12 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 	if tor.bitf, err = tor.fileStore.Validate(); err != nil {
 		logger.Error("Failed to run validation on new filestore: %s", err)
 		return
+	}
+
+	tor.swarmTally = make(swarmTally, tor.bitf.Length())
+	err = tor.swarmTally.InitializeWithBitfield(tor.bitf)
+	if err != nil {
+		logger.Error("Failed to initialize swarmtally with our bitfield")
 	}
 
 	return
@@ -129,20 +137,17 @@ func (tor *Torrent) Start() {
 				// TODO: Implement optimistic unchoking algorithm
 				// TODO: will do this through policy struct
 				// something like;
-				// tor.policy.ChokeUnchokePeers(tor.swarm, tor.swarmTally)
+				tor.policy.ChokeUnchokePeers(tor.swarm, tor.swarmTally)
 
-				for _, peer := range tor.swarm {
-					if peer.GetPeerInterested() && peer.GetAmChoking() {
-						logger.Debug("Unchoking peer %s", peer.name)
-						peer.write <- &unchokeMessage{}
-						peer.SetAmChoking(false)
-					}
-				}
+				// for _, peer := range tor.swarm {
+				// 	if peer.GetPeerInterested() && peer.GetAmChoking() {
+				// 		logger.Debug("Unchoking peer %s", peer.name)
+				// 		peer.write <- &unchokeMessage{}
+				// 		peer.SetAmChoking(false)
+				// 	}
+				// }
 
-				//TODO: Something like;
-				//tor.policy.RequestBlocks(tor.swarm, tor.swarmTally)
-				//this will be incharge of analysing the swarm and
-				//send request messages out to the peers
+				tor.policy.RequestBlocks(tor.swarm, tor.swarmTally)
 			}
 		}
 	}()
@@ -159,6 +164,7 @@ func (tor *Torrent) Start() {
 					// We did not get a bitfield message
 					// And the peer bitfield has not been set yet.
 					logger.Debug("No bitfield sent by %s. Setting it to blank", peer.name)
+					logger.Debug("%d", tor.bitf.Length())
 					peer.SetBitfield(bitfield.NewBitfield(tor.bitf.Length()))
 				}
 			}
@@ -183,7 +189,8 @@ func (tor *Torrent) Start() {
 					// TODO: Shutdown client
 				}
 				peer.HasPiece(pieceIndex)
-				// TODO: Update swarmTally
+				tor.swarmTally.AddIndex(pieceIndex)
+
 			case *bitfieldMessage:
 				logger.Debug("Peer %s has sent us its bitfield", peer.name)
 				// Raw parsed bitfield has no actual length. Let's try to set it.

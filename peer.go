@@ -43,7 +43,7 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 		ticker := time.NewTicker(30 * time.Second)
 		for {
 			select {
-			case tick := <-ticker.C:
+			case <-ticker.C:
 				logger.Debug("%s Is being sent a keep alive message", p.name)
 				msg := new(keepAliveMessage)
 				if err := msg.BinaryDump(conn); err != nil {

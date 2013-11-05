@@ -8,6 +8,24 @@ import (
 
 type swarmTally []int
 
+func (st swarmTally) InitializeWithBitfield(bitf *bitfield.Bitfield) (err error) {
+
+	if len(st) != bitf.Length() {
+		err = errors.New(fmt.Sprintf("addBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length()))
+		return
+	}
+
+	for i := 0; i < len(st); i++ {
+		if bitf.Get(i) {
+			st[i] = -1
+		} else {
+			st[i] = 0
+		}
+	}
+	return
+
+}
+
 func (st swarmTally) AddBitfield(bitf *bitfield.Bitfield) (err error) {
 	if len(st) != bitf.Length() {
 		err = errors.New(fmt.Sprintf("addBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length()))
@@ -48,6 +66,15 @@ func (st swarmTally) Zero() {
 	for i := 0; i < len(st); i++ {
 		if st[i] != -1 {
 			st[i] = 0
+		}
+	}
+}
+
+func (st swarmTally) AddIndex(i int) {
+	if i < len(st) {
+		val := st[i]
+		if val != -1 {
+			st[i] = val + 1
 		}
 	}
 }

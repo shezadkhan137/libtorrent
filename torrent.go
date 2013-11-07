@@ -47,7 +47,6 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 		incomingPeerAddr: make(chan string, 100),
 		readChan:         make(chan peerDouble, 50),
 		state:            Stopped,
-		policy:           new(BasicPolicy),
 	}
 
 	// Extract file information to create a slice of torrentStorers
@@ -77,6 +76,10 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 	if err != nil {
 		logger.Error("Failed to initialize swarmtally with our bitfield")
 	}
+
+	// Add policy
+
+	tor.policy = new(BasicPolicy)
 
 	return
 }
@@ -147,7 +150,7 @@ func (tor *Torrent) Start() {
 				// 	}
 				// }
 
-				tor.policy.RequestBlocks(tor.swarm, tor.swarmTally)
+				tor.policy.RequestBlocks(tor.swarm, tor.swarmTally, tor.meta)
 			}
 		}
 	}()
@@ -219,9 +222,9 @@ func (tor *Torrent) Start() {
 					blockOffset: msg.blockOffset,
 					data:        block,
 				}
-			// case *pieceMessage:
-			// 	logger.Debug("Peer %s sent piece message", peer.name)
-			// 	// TODO: call filestore.SetBlock()
+			case *pieceMessage:
+				logger.Debug("Peer %s sent piece message", peer.name)
+				// TODO: call filestore.SetBlock()
 			// case *cancelMessage:
 			// 	logger.Debug("Peer %s send cancel message", peer.name)
 			default:
@@ -274,9 +277,8 @@ func (t *Torrent) AddPeer(conn net.Conn, hs *handshake) {
 	}
 
 	peer := newPeer(string(hs.peerId), conn, t.readChan)
-	peer.write <- &bitfieldMessage{bitf: t.bitf}
+	//peer.write <- &bitfieldMessage{bitf: t.bitf}
 	t.incomingPeer <- peer
-
 	conn.SetDeadline(time.Time{})
 }
 

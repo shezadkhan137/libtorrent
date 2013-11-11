@@ -104,8 +104,81 @@ func (fs *FileStore) GetBlock(pieceIndex int, offset int64, length int64) (block
 	return
 }
 
+func (f *FileStore) GetTotalLength() int64 {
+	return f.totalLength
+}
+
+func (fs *FileStore) SetBlock(pieceIndex uint32, offset uint32, block []byte, pieceIsComplete bool) (shouldRemove bool, err error) {
+	fmt.Println("Received Setblock", pieceIndex, offset, len(block))
+
+	if len(block)+int(offset) > int(fs.getPieceLength(int(pieceIndex))) {
+		err = errors.New("Requested block overran piece length")
+		return
+	}
+
+	offset = uint32(pieceIndex)*uint32(fs.pieceLength) + uint32(offset) // Offset from the beginning
+
+	sofar := uint32(0)
+	//i := uint32(0)
+	var tfile TorrentStorer = nil
+	var i int = 0
+
+	for i, tfile = range fs.tfiles {
+		sofar += uint32(tfile.Length()) // This tfile is where we start writing on
+		if sofar > offset {
+			//tfile.WriteAt(block, int64(sofar-offset))
+			break
+		}
+	}
+
+	if tfile == nil {
+		err = errors.New("Could not get the file for this offset")
+		return
+	}
+
+	lengthOfDataToWrite := len(block)
+	n := 0 // Amount of data written
+	localFileOffset := int(offset) - (int(sofar) - int(tfile.Length()))
+	nnew := 0
+	for n < lengthOfDataToWrite {
+		tfile := fs.tfiles[i]
+		spaceLeftInFile := int(tfile.Length()) - localFileOffset
+		if spaceLeftInFile > lengthOfDataToWrite-n { // If rest can fit in the same file
+			nnew, err = tfile.WriteAt(block[n:], int64(localFileOffset))
+		} else {
+			nnew, err = tfile.WriteAt(block[n:n+spaceLeftInFile], int64(localFileOffset))
+		}
+		n += nnew
+		localFileOffset = 0
+		i++
+	}
+
+	if pieceIsComplete {
+		// Validate block
+		var ok bool
+		ok, err = fs.validatePiece(int(pieceIndex))
+
+		if err != nil {
+			return
+		}
+
+		if ok {
+			shouldRemove = false
+			return
+		}
+
+		// Piece not valid
+		shouldRemove = true
+		return
+	}
+
+	shouldRemove = false
+	return
+}
+
 type TorrentStorer interface {
 	io.ReaderAt
+	io.WriterAt
 	Length() int64
 }
 
@@ -169,6 +242,11 @@ func NewTorrentFile(rootDirectory string, path string, length int64) (tfile *Tor
 
 func (tf *TorrentFile) ReadAt(p []byte, off int64) (n int, err error) {
 	n, err = tf.fd.ReadAt(p, off)
+	return
+}
+
+func (tf *TorrentFile) WriteAt(p []byte, off int64) (n int, err error) {
+	n, err = tf.fd.WriteAt(p, off)
 	return
 }
 

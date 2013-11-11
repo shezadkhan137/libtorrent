@@ -124,6 +124,20 @@ func (p *peer) SetPeerInterested(b bool) {
 	p.mutex.Unlock()
 }
 
+func (p *peer) GetAmInterested() (b bool) {
+	p.mutex.RLock()
+	b = p.amInterested
+	p.mutex.RUnlock()
+	return
+}
+
+func (p *peer) SetAmInterested(b bool) {
+	p.mutex.Lock()
+	p.amInterested = b
+	p.mutex.Unlock()
+	return
+}
+
 func (p *peer) SetBitfield(bitf *bitfield.Bitfield) {
 	p.mutex.Lock()
 	p.bitf = bitf

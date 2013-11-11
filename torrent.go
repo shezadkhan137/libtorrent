@@ -28,7 +28,9 @@ type Torrent struct {
 	fileStore        *filestore.FileStore
 	config           *Config
 	bitf             *bitfield.Bitfield
-	policy           Policy
+	choker           Choker
+	piecePicker      PiecePicker
+	peerRequester    PeerRequester
 	swarm            []*peer
 	incomingPeer     chan *peer
 	incomingPeerAddr chan string
@@ -75,11 +77,18 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 	err = tor.swarmTally.InitializeWithBitfield(tor.bitf)
 	if err != nil {
 		logger.Error("Failed to initialize swarmtally with our bitfield")
+		return
 	}
 
-	// Add policy
+	piecePicker, err := NewPiecePicker(tor.meta, int(tor.fileStore.GetTotalLength()))
+	if err != nil {
+		logger.Error("Failed to create piecePicker")
+		return
+	}
 
-	tor.policy = new(BasicPolicy)
+	tor.piecePicker = piecePicker
+	tor.choker = new(BasicChoker)
+	tor.peerRequester = new(BasicPeerRequester)
 
 	return
 }
@@ -128,29 +137,21 @@ func (tor *Torrent) Start() {
 
 	// Peer loop
 	go func() {
+		ticker := time.NewTicker(time.Second * 5)
 		for {
 			select {
 			case peer := <-tor.incomingPeer:
 				// Add to swarm slice
 				logger.Debug("Connected to new peer: %s", peer.name)
 				tor.swarm = append(tor.swarm, peer)
-			case <-time.After(time.Second * 5):
-				// Unchoke interested peers
-				// TODO: Implement maximum unchoked peers
-				// TODO: Implement optimistic unchoking algorithm
-				// TODO: will do this through policy struct
-				// something like;
-				tor.policy.ChokeUnchokePeers(tor.swarm, tor.swarmTally)
+			case <-ticker.C:
+				tor.choker.ChokeUnchokePeers(tor.swarm, tor.swarmTally)
+				pieceBlocks := tor.piecePicker.NewRequests(tor.swarmTally)
+				tor.peerRequester.RequestFromPeers(tor.swarm, pieceBlocks)
+			}
 
-				// for _, peer := range tor.swarm {
-				// 	if peer.GetPeerInterested() && peer.GetAmChoking() {
-				// 		logger.Debug("Unchoking peer %s", peer.name)
-				// 		peer.write <- &unchokeMessage{}
-				// 		peer.SetAmChoking(false)
-				// 	}
-				// }
-
-				tor.policy.RequestBlocks(tor.swarm, tor.swarmTally, tor.meta)
+			if tor.State() != Leeching {
+				ticker.Stop()
 			}
 		}
 	}()
@@ -224,7 +225,37 @@ func (tor *Torrent) Start() {
 				}
 			case *pieceMessage:
 				logger.Debug("Peer %s sent piece message", peer.name)
-				// TODO: call filestore.SetBlock()
+				pieceIsComplete, err := tor.piecePicker.PieceReceived(*msg)
+
+				if err != nil {
+					logger.Error(err.Error())
+					break
+				}
+
+				shouldRemove, err := tor.fileStore.SetBlock(msg.pieceIndex, msg.blockOffset, msg.data, pieceIsComplete)
+				if err != nil {
+					logger.Error(err.Error())
+					break
+				}
+
+				logger.Debug("Should remove this piece? %s", shouldRemove)
+
+				if pieceIsComplete && !shouldRemove {
+					tor.bitf.SetTrue(int(msg.pieceIndex))
+					logger.Debug("Address of swarmtally in received: %p", &tor.swarmTally)
+					tor.swarmTally.SetWeHave(int(msg.pieceIndex))
+					logger.Debug("Is complete st: %d", tor.swarmTally)
+					peer.write <- &haveMessage{pieceIndex: msg.pieceIndex}
+
+					tor.stateLock.Lock()
+					if tor.bitf.SumTrue() == tor.bitf.Length() {
+						tor.state = Seeding
+					} else {
+						tor.state = Leeching
+					}
+					tor.stateLock.Unlock()
+				}
+
 			// case *cancelMessage:
 			// 	logger.Debug("Peer %s send cancel message", peer.name)
 			default:
@@ -277,7 +308,7 @@ func (t *Torrent) AddPeer(conn net.Conn, hs *handshake) {
 	}
 
 	peer := newPeer(string(hs.peerId), conn, t.readChan)
-	//peer.write <- &bitfieldMessage{bitf: t.bitf}
+	peer.write <- &bitfieldMessage{bitf: t.bitf}
 	t.incomingPeer <- peer
 	conn.SetDeadline(time.Time{})
 }

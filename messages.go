@@ -110,7 +110,7 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 	} else if length == 0 {
 		// Keepalive message
 		return
-	} else if length > 131072 {
+	} else if length > 783870696 {
 		// Set limit at 2^17. Might need to revise this later
 		err = errors.New(fmt.Sprintf("Message size too long: %d", length))
 		return
